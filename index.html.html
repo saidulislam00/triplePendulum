@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Triple Pendulum – Single‑File HTML Simulation</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --panel: #121826;
+      --muted: #93a0b5;
+      --text: #e9eef7;
+      --accent: #6ea8fe;
+      --good: #4ade80;
+      --bad: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 800px at 20% 10%, #0f1524, #0b0f17 60%);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 10px;
+    }
+    header {
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(180deg, #121826, #0f1421);
+      box-shadow: 0 4px 20px rgba(0,0,0,.25);
+      position: sticky; top: 0; z-index: 10;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+    #app { display: grid; grid-template-columns: 320px 1fr; gap: 12px; padding: 0 12px 12px; }
+    @media (max-width: 900px) { #app { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid #202a3d;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+
+    .controls { display: grid; gap: 10px; }
+    .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+    .row > label { color: var(--muted); font-size: 12px; }
+    .row > input[type="range"] { width: 100%; }
+    .row > input[type="number"] { width: 90px; background: #0f1421; color: var(--text); border: 1px solid #243148; border-radius: 8px; padding: 6px 8px; }
+
+    .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 6px; }
+    button {
+      background: #0f1421;
+      color: var(--text);
+      border: 1px solid #243148;
+      border-radius: 12px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: transform .05s ease, background .2s ease, border-color .2s ease;
+    }
+    button:hover { background: #121a2b; border-color: #2b3a55; }
+    button:active { transform: translateY(1px); }
+    button.primary { background: #14213a; border-color: #38507c; }
+    button.good { border-color: #1b7238; background: #0f1b14; }
+    button.bad { border-color: #7a1f2b; background: #1a0f12; }
+
+    canvas { width: 100%; height: 100%; display: block; background: transparent; }
+    .stage { position: relative; overflow: hidden; border-radius: 16px; }
+    .hud { position: absolute; left: 10px; top: 10px; padding: 10px 12px; background: rgba(13,19,32,.65); border: 1px solid #22304b; border-radius: 12px; font-family: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+    .legend { display: flex; gap: 12px; margin-top: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .dot.a { background: #9ae6b4; }
+    .dot.b { background: #7dd3fc; }
+    .dot.c { background: #fca5a5; }
+    .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+    footer { color: var(--muted); padding: 8px 16px 14px; text-align: center; }
+    a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Triple Pendulum • Constraint‑based Physics (Verlet + Distance Constraints)</h1>
+    <div class="legend">
+      <div><span class="dot a"></span>Bob 1</div>
+      <div><span class="dot b"></span>Bob 2</div>
+      <div><span class="dot c"></span>Bob 3</div>
+    </div>
+  </header>
+
+  <div id="app">
+    <aside class="panel">
+      <div class="controls">
+        <div class="row"><label>Gravity (m/s²)</label><input id="gravity" type="range" min="0" max="30" step="0.1" value="9.81"></div>
+        <div class="row"><label>Air damping</label><input id="damping" type="range" min="0" max="0.02" step="0.0005" value="0.0025"></div>
+        <div class="row"><label>Rod length (px)</label><input id="rodLen" type="range" min="40" max="260" step="1" value="170"></div>
+        <div class="row"><label>Masses (kg)</label>
+          <input id="m1" type="number" step="0.1" value="1.0" />
+        </div>
+        <div class="row"><label></label><input id="m2" type="number" step="0.1" value="1.0" /></div>
+        <div class="row"><label></label><input id="m3" type="number" step="0.1" value="1.0" /></div>
+        <div class="row"><label>Constraint iterations</label><input id="iters" type="range" min="1" max="40" step="1" value="18"></div>
+        <div class="row"><label>Time step (s)</label><input id="dt" type="range" min="0.001" max="0.01" step="0.0005" value="0.0035"></div>
+        <div class="row"><label>Trail length</label><input id="trailLen" type="range" min="50" max="2000" step="10" value="600"></div>
+        <div class="row"><label>Shake (kick) amplitude</label><input id="kick" type="range" min="0" max="500" step="1" value="140"></div>
+        <div class="btns">
+          <button id="toggle" class="primary">⏯️ Play / Pause</button>
+          <button id="reset" class="good">🔄 Reset</button>
+          <button id="random" class="primary">🎲 Randomize</button>
+          <button id="kickBtn" class="bad">⚡ Kick</button>
+        </div>
+        <div class="note">This simulation uses <strong>Verlet integration</strong> with iterative <strong>distance constraints</strong> (a.k.a. position‑based dynamics) to enforce rigid, massless rods. It conserves length constraints and approximates real dynamics well for small time‑steps and sufficient solver iterations.</div>
+      </div>
+    </aside>
+
+    <section class="panel stage">
+      <canvas id="view" width="1200" height="720"></canvas>
+      <div class="hud" id="hud"></div>
+    </section>
+  </div>
+
+  <footer>
+    Drag a bob with your mouse (or touch) to reposition. Hold <code>Shift</code> while dragging to pin/unpin a node. Hold <code>Alt</code> (Option) while dragging to clone initial pose for reset.
+  </footer>
+
+  <script>
+  (function(){
+    const canvas = document.getElementById('view');
+    const ctx = canvas.getContext('2d');
+    const hud = document.getElementById('hud');
+
+    const ui = {
+      gravity: document.getElementById('gravity'),
+      damping: document.getElementById('damping'),
+      rodLen: document.getElementById('rodLen'),
+      iters: document.getElementById('iters'),
+      dt: document.getElementById('dt'),
+      trailLen: document.getElementById('trailLen'),
+      m1: document.getElementById('m1'),
+      m2: document.getElementById('m2'),
+      m3: document.getElementById('m3'),
+      kick: document.getElementById('kick'),
+      toggle: document.getElementById('toggle'),
+      reset: document.getElementById('reset'),
+      random: document.getElementById('random'),
+      kickBtn: document.getElementById('kickBtn')
+    };
+
+    const W = () => canvas.width = canvas.clientWidth * devicePixelRatio;
+    const H = () => canvas.height = canvas.clientHeight * devicePixelRatio;
+    const resize = () => { W(); H(); };
+    resize();
+    window.addEventListener('resize', resize);
+
+    // World parameters
+    let params = {
+      g: 9.81, // gravity (m/s^2)
+      damping: 0.0025, // air damping proportional to velocity
+      dt: 0.0035, // seconds per substep
+      substeps: 1, // can increase for stability
+      iters: 18, // constraint solver iterations
+      L: 170, // pixels per rod
+      masses: [1,1,1], // kg
+      origin: {x: canvas.width*0.5, y: canvas.height*0.18},
+    };
+
+    // Node (point mass) with Verlet integration
+    class Node {
+      constructor(x, y, mass=1, pinned=false) {
+        this.pos = {x, y};
+        this.prev = {x, y};
+        this.mass = mass;
+        this.invMass = pinned ? 0 : 1/mass;
+        this.pinned = pinned;
+        this.color = '#9ae6b4';
+        this.radius = 9 * devicePixelRatio;
+      }
+      setMass(m) {
+        this.mass = m; this.invMass = this.pinned ? 0 : 1/m;
+      }
+      pin(state=true){ this.pinned = state; this.invMass = state ? 0 : 1/this.mass; }
+    }
+
+    class DistanceConstraint {
+      constructor(a, b, rest, compliance=0) {
+        this.a = a; this.b = b; this.rest = rest; this.compliance = compliance;
+      }
+      solve(dt){
+        const ax = this.a.pos.x, ay = this.a.pos.y;
+        const bx = this.b.pos.x, by = this.b.pos.y;
+        let dx = bx - ax, dy = by - ay;
+        const dist = Math.hypot(dx, dy) || 1e-8;
+        const w1 = this.a.invMass, w2 = this.b.invMass;
+        const wsum = w1 + w2;
+        if (wsum === 0) return;
+        const C = dist - this.rest; // constraint function
+        const nX = dx / dist, nY = dy / dist; // normalized direction
+        const alpha = this.compliance / (dt*dt);
+        const lambda = - C / (wsum + alpha);
+        const corrX = lambda * nX;
+        const corrY = lambda * nY;
+        this.a.pos.x -= w1 * corrX;
+        this.a.pos.y -= w1 * corrY;
+        this.b.pos.x += w2 * corrX;
+        this.b.pos.y += w2 * corrY;
+      }
+    }
+
+    // World model: 3 bobs + 3 rods + optional pin at origin
+    let nodes = [];
+    let rods = [];
+    let trail = [];
+    let running = true;
+    let initialPose = null;
+
+    function buildSystem(){
+      const {origin, L, masses} = params;
+      nodes = [];
+      const anchor = new Node(origin.x, origin.y, Infinity, true); // ceiling pin
+      anchor.radius = 4 * devicePixelRatio;
+      anchor.color = '#cbd5e1';
+      nodes.push(anchor);
+
+      const p1 = new Node(origin.x, origin.y + L, masses[0]);
+      p1.color = '#9ae6b4';
+      const p2 = new Node(origin.x, origin.y + L*2, masses[1]);
+      p2.color = '#7dd3fc';
+      const p3 = new Node(origin.x, origin.y + L*3, masses[2]);
+      p3.color = '#fca5a5';
+      nodes.push(p1, p2, p3);
+
+      rods = [];
+      rods.push(new DistanceConstraint(nodes[0], nodes[1], L));
+      rods.push(new DistanceConstraint(nodes[1], nodes[2], L));
+      rods.push(new DistanceConstraint(nodes[2], nodes[3], L));
+
+      trail = [];
+      initialPose = snapshot();
+    }
+
+    function snapshot(){
+      return nodes.map(n => ({x:n.pos.x, y:n.pos.y, px:n.prev.x, py:n.prev.y, pinned:n.pinned, m:n.mass}));
+    }
+    function restore(snap){
+      snap.forEach((s, i)=>{
+        const n = nodes[i];
+        n.pos.x = s.x; n.pos.y = s.y; n.prev.x = s.px; n.prev.y = s.py; n.pin(s.pinned); n.setMass(s.m);
+      });
+    }
+
+    function kick(amp=140){
+      // small random velocity added to each bob
+      for(let i=1;i<nodes.length;i++){
+        const n = nodes[i];
+        const vx = (Math.random()*2-1) * amp;
+        const vy = (Math.random()*2-1) * amp;
+        n.prev.x = n.pos.x - vx * params.dt;
+        n.prev.y = n.pos.y - vy * params.dt;
+      }
+    }
+
+    function integrate(){
+      const {dt, g, damping, substeps} = params;
+      const subDt = dt / substeps;
+      for (let s=0; s<substeps; s++){
+        for (let i=1;i<nodes.length;i++){
+          const n = nodes[i];
+          if (n.invMass === 0) continue; // pinned
+          const x = n.pos.x, y = n.pos.y;
+
+          // approximate velocity from Verlet state
+          let vx = (n.pos.x - n.prev.x) * (1 - damping);
+          let vy = (n.pos.y - n.prev.y) * (1 - damping);
+
+          // acceleration (gravity)
+          vy += g * subDt * subDt * 100; // scale to pixels
+
+          // Verlet update
+          n.prev.x = x; n.prev.y = y;
+          n.pos.x = x + vx;
+          n.pos.y = y + vy;
+        }
+        // Solve constraints iteratively
+        for (let k=0; k<params.iters; k++){
+          for (const c of rods) c.solve(subDt);
+        }
+      }
+    }
+
+    function draw(){
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0,0,w,h);
+
+      // delicate glow grid
+      ctx.save();
+      ctx.globalAlpha = 0.08;
+      const s = 40 * devicePixelRatio;
+      ctx.beginPath();
+      for(let x=0;x<w;x+=s){ ctx.moveTo(x,0); ctx.lineTo(x,h); }
+      for(let y=0;y<h;y+=s){ ctx.moveTo(0,y); ctx.lineTo(w,y); }
+      ctx.strokeStyle = '#2a3347';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+
+      // draw rods
+      ctx.lineWidth = 2 * devicePixelRatio;
+      ctx.strokeStyle = '#94a3b8';
+      ctx.beginPath();
+      for (let i=0;i<rods.length;i++){
+        const a = rods[i].a.pos, b = rods[i].b.pos;
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+      ctx.stroke();
+
+      // update trail with last bob
+      const last = nodes[3].pos;
+      trail.push({x:last.x, y:last.y});
+      const maxTrail = ~~ui.trailLen.value;
+      while(trail.length > maxTrail) trail.shift();
+
+      // draw trail
+      if (trail.length > 1){
+        ctx.beginPath();
+        for(let i=0;i<trail.length;i++){
+          const p = trail[i];
+          if(i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = 'rgba(110,168,254,0.6)';
+        ctx.lineWidth = 1.5 * devicePixelRatio;
+        ctx.stroke();
+      }
+
+      // draw nodes
+      for (let i=0;i<nodes.length;i++){
+        const n = nodes[i];
+        ctx.beginPath();
+        ctx.arc(n.pos.x, n.pos.y, n.radius, 0, Math.PI*2);
+        ctx.fillStyle = n.color;
+        ctx.fill();
+        if (n.pinned){
+          ctx.beginPath();
+          ctx.arc(n.pos.x, n.pos.y, n.radius*0.5, 0, Math.PI*2);
+          ctx.fillStyle = '#64748b';
+          ctx.fill();
+        }
+      }
+
+      // HUD data
+      const E = computeEnergy();
+      hud.innerHTML = `
+        <div><b>Energy</b> (approx): <span style="color:${E.dE>0? 'var(--bad)': 'var(--good)'}">${E.total.toFixed(2)} J</span></div>
+        <div>ΔE since reset: ${E.dE.toFixed(2)} J</div>
+        <div>Rod length: ${params.L.toFixed(0)} px • Iterations: ${params.iters}</div>
+        <div>dt: ${params.dt.toFixed(4)} s • damping: ${params.damping.toFixed(4)} • g: ${params.g.toFixed(2)} m/s²</div>
+      `;
+    }
+
+    let E0 = 0; // initial energy for comparison
+    function computeEnergy(){
+      // Approximate energy using current velocity (from Verlet state) and potential energy (y position)
+      // pixel/meter scale factor: assume 100 px == 1 m (matches integration scaling)
+      const pxPerM = 100;
+      let KE = 0, PE = 0;
+      for (let i=1;i<nodes.length;i++){
+        const n = nodes[i];
+        const vx = (n.pos.x - n.prev.x) / params.dt / pxPerM;
+        const vy = (n.pos.y - n.prev.y) / params.dt / pxPerM;
+        const v2 = vx*vx + vy*vy;
+        KE += 0.5 * n.mass * v2;
+        const yMeters = (n.pos.y - params.origin.y) / pxPerM;
+        PE += n.mass * params.g * yMeters;
+      }
+      const total = KE + PE;
+      return { KE, PE, total, dE: total - E0 };
+    }
+
+    function step(){
+      if (running) integrate();
+      draw();
+      requestAnimationFrame(step);
+    }
+
+    // Interaction
+    let drag = { active:false, node:null, dx:0, dy:0, cloneOnRelease:false, togglePin:false };
+    function findNode(mx,my){
+      for (let i=nodes.length-1;i>=0;i--){
+        const n = nodes[i];
+        const r = n.radius + 6*devicePixelRatio;
+        const dx = mx - n.pos.x, dy = my - n.pos.y;
+        if (dx*dx+dy*dy <= r*r) return n;
+      }
+      return null;
+    }
+    function toCanvas(e){
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * devicePixelRatio;
+      const y = (e.clientY - rect.top) * devicePixelRatio;
+      return {x,y};
+    }
+    canvas.addEventListener('pointerdown', e => {
+      const {x,y} = toCanvas(e);
+      const n = findNode(x,y);
+      if (!n) return;
+      drag.active = true; drag.node = n;
+      drag.dx = x - n.pos.x; drag.dy = y - n.pos.y;
+      drag.cloneOnRelease = e.altKey; // Option to clone pose for reset
+      drag.togglePin = e.shiftKey;    // Shift to toggle pin
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!drag.active) return;
+      const {x,y} = toCanvas(e);
+      const n = drag.node;
+      // move node directly (teleport) – update prev to avoid explosive velocities
+      n.pos.x = x - drag.dx; n.pos.y = y - drag.dy;
+      n.prev.x = n.pos.x; n.prev.y = n.pos.y;
+    });
+    canvas.addEventListener('pointerup', e => {
+      if (!drag.active) return;
+      const n = drag.node;
+      if (drag.togglePin){ n.pin(!n.pinned); }
+      drag.active = false; drag.node = null;
+      if (drag.cloneOnRelease) initialPose = snapshot();
+    });
+
+    // UI wiring
+    ui.gravity.addEventListener('input', ()=> params.g = parseFloat(ui.gravity.value));
+    ui.damping.addEventListener('input', ()=> params.damping = parseFloat(ui.damping.value));
+    ui.rodLen.addEventListener('input', ()=> { params.L = parseFloat(ui.rodLen.value); rebuildLengths(); });
+    ui.iters.addEventListener('input', ()=> params.iters = parseInt(ui.iters.value));
+    ui.dt.addEventListener('input', ()=> params.dt = parseFloat(ui.dt.value));
+    ui.trailLen.addEventListener('input', ()=> {/*handled in draw*/});
+    ui.m1.addEventListener('change', ()=> nodes[1].setMass(parseFloat(ui.m1.value)));
+    ui.m2.addEventListener('change', ()=> nodes[2].setMass(parseFloat(ui.m2.value)));
+    ui.m3.addEventListener('change', ()=> nodes[3].setMass(parseFloat(ui.m3.value)));
+
+    ui.toggle.addEventListener('click', ()=> running = !running);
+    ui.reset.addEventListener('click', ()=> { restore(initialPose); trail = []; E0 = computeEnergy().total; });
+    ui.random.addEventListener('click', ()=> randomizePose());
+    ui.kickBtn.addEventListener('click', ()=> kick(parseFloat(ui.kick.value)));
+
+    function rebuildLengths(){
+      rods[0].rest = rods[1].rest = rods[2].rest = params.L;
+      // nudge to satisfy quickly
+      for (let k=0;k<params.iters*2;k++) for (const c of rods) c.solve(params.dt);
+    }
+
+    function randomizePose(){
+      const {origin, L} = params;
+      const th1 = Math.random()*Math.PI*1.8 - Math.PI*0.9;
+      const th2 = Math.random()*Math.PI*1.8 - Math.PI*0.9;
+      const th3 = Math.random()*Math.PI*1.8 - Math.PI*0.9;
+      const p0 = {x: origin.x, y: origin.y};
+      const p1 = {x: p0.x + L*Math.sin(th1), y: p0.y + L*Math.cos(th1)};
+      const p2 = {x: p1.x + L*Math.sin(th2), y: p1.y + L*Math.cos(th2)};
+      const p3 = {x: p2.x + L*Math.sin(th3), y: p2.y + L*Math.cos(th3)};
+      const arr = [p0,p1,p2,p3];
+      for(let i=0;i<nodes.length;i++){
+        nodes[i].pos.x = arr[i].x; nodes[i].pos.y = arr[i].y;
+        nodes[i].prev.x = arr[i].x; nodes[i].prev.y = arr[i].y;
+      }
+      trail = [];
+      initialPose = snapshot();
+      E0 = computeEnergy().total;
+    }
+
+    // Initialize
+    buildSystem();
+    // Slight offset to break symmetry
+    nodes[2].pos.x += 40; nodes[3].pos.x -= 20;
+    nodes[2].prev.x = nodes[2].pos.x; nodes[3].prev.x = nodes[3].pos.x;
+    E0 = computeEnergy().total;
+
+    function start(){ requestAnimationFrame(step); }
+    start();
+
+  })();
+  </script>
+</body>
+</html>
